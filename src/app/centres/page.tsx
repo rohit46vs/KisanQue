@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import CentreMap from "@/components/farmer/CentreMap";
@@ -30,7 +31,7 @@ export default async function CentresPage() {
       longitude,
       daily_capacity,
       is_active
-      `
+      `,
     )
     .eq("is_active", true)
     .order("name");
@@ -55,8 +56,8 @@ export default async function CentresPage() {
             </h1>
 
             <p className="mt-2 max-w-2xl text-[var(--color-text-secondary)]">
-              Find an active procurement centre and choose a convenient
-              slot for your visit.
+              Find an active procurement centre and choose a convenient slot for
+              your visit.
             </p>
           </div>
 
@@ -64,9 +65,7 @@ export default async function CentresPage() {
             <CentreMap centres={safeCentres} />
 
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold">
-                Available Centres
-              </h2>
+              <h2 className="text-lg font-semibold">Available Centres</h2>
 
               {safeCentres.length === 0 ? (
                 <Card className="p-6">
@@ -76,20 +75,14 @@ export default async function CentresPage() {
                 </Card>
               ) : (
                 safeCentres.map((centre) => (
-                  <Card
-                    key={centre.id}
-                    hover
-                    className="p-5"
-                  >
+                  <Card key={centre.id} hover className="p-5">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-xs font-medium text-[var(--color-primary)]">
                           {centre.centre_code}
                         </p>
 
-                        <h3 className="mt-1 font-semibold">
-                          {centre.name}
-                        </h3>
+                        <h3 className="mt-1 font-semibold">{centre.name}</h3>
                       </div>
 
                       <span className="rounded-full bg-[var(--color-primary-light)] px-2.5 py-1 text-xs font-medium text-[var(--color-primary)]">
@@ -103,9 +96,7 @@ export default async function CentresPage() {
 
                     <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
                       {centre.district}, {centre.state}
-                      {centre.pincode
-                        ? ` - ${centre.pincode}`
-                        : ""}
+                      {centre.pincode ? ` - ${centre.pincode}` : ""}
                     </p>
 
                     <div className="mt-4 flex items-center justify-between border-t border-[var(--color-border)] pt-4">
@@ -113,12 +104,12 @@ export default async function CentresPage() {
                         Daily capacity: {centre.daily_capacity}
                       </span>
 
-                      <button
-                        type="button"
+                      <Link
+                        href={`/centres/${centre.id}`}
                         className="rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-medium text-white transition hover:bg-[var(--color-primary-dark)]"
                       >
                         View slots
-                      </button>
+                      </Link>
                     </div>
                   </Card>
                 ))
