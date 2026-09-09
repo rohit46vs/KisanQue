@@ -10,6 +10,10 @@ type BookSlotButtonProps = {
   disabled?: boolean;
 };
 
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:4000";
+
 export default function BookSlotButton({
   slotId,
   disabled = false,
@@ -31,50 +35,60 @@ export default function BookSlotButton({
     setError(null);
 
     try {
-      const { data, error: bookingError } =
-        await supabase.rpc("book_slot", {
-          p_slot_id: slotId,
-        });
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
 
-      if (bookingError) {
-        console.error(
-          "Booking error:",
-          bookingError.message
-        );
-
+      if (sessionError || !session?.access_token) {
         setError(
-          bookingError.message ||
-            "Unable to book this slot."
+          "Your session has expired. Please log in again."
         );
-
         setLoading(false);
         return;
       }
 
-      // Supabase can return the result as an object
-      // or as the first item of an array.
-      const booking = Array.isArray(data)
-        ? data[0]
-        : data;
+      const response = await fetch(
+        `${API_URL}/api/bookings`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            slot_id: slotId,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        setError(
+          result.error ||
+            "Unable to book this slot."
+        );
+        setLoading(false);
+        return;
+      }
+
+      const booking = result.data;
 
       if (!booking?.id) {
         console.error(
           "Unexpected booking response:",
-          data
+          result
         );
 
         setError(
           "Booking was created, but the booking details could not be loaded."
         );
-
         setLoading(false);
         return;
       }
 
-      // Go to booking confirmation page
-      router.push(
-        `/booking/${booking.id}`
-      );
+      router.push(`/booking/${booking.id}`);
     } catch (error) {
       console.error(
         "Unexpected booking error:",
@@ -82,7 +96,7 @@ export default function BookSlotButton({
       );
 
       setError(
-        "Something went wrong. Please try again."
+        "Unable to connect to the booking service. Please try again."
       );
 
       setLoading(false);

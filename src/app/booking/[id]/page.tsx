@@ -1,255 +1,430 @@
-import { createClient } from "@/lib/supabase/server";
-import { redirect, notFound } from "next/navigation";
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import QRCode from "qrcode";
 import {
-  CheckCircle2,
-  MapPin,
+  ArrowLeft,
   CalendarDays,
   Clock,
+  MapPin,
+  QrCode,
+  Scale,
   Ticket,
+  Users,
 } from "lucide-react";
-import { Container } from "@/components/ui/Container";
-import { Card } from "@/components/ui/Card";
+import { useParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
-type BookingPageProps = {
-  params: Promise<{
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:4000";
+
+type Booking = {
+  id: string;
+  token_number: number;
+  status: string;
+  booked_at: string;
+  estimated_quantity_qtl: number | null;
+  qr_token: string | null;
+  gate_pass_number: string | null;
+  queue_position: number | null;
+  current_stage: string | null;
+  slot: {
     id: string;
-  }>;
+    slot_date: string;
+    start_time: string;
+    end_time: string;
+    centre: {
+      id: string;
+      centre_code: string;
+      name: string;
+      address: string;
+      district: string;
+      state: string;
+      pincode: string;
+    };
+  };
 };
 
-export default async function BookingPage({
-  params,
-}: BookingPageProps) {
-  const { id } = await params;
+export default function BookingDetailsPage() {
+  const params = useParams();
+  const bookingId = params.id as string;
 
-  const supabase = await createClient();
+  const supabase = createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const [booking, setBooking] =
+    useState<Booking | null>(null);
 
-  if (!user) {
-    redirect("/login");
-  }
+  const [qrCode, setQrCode] =
+    useState<string | null>(null);
 
-  const { data: booking, error } =
-    await supabase
-      .from("bookings")
-      .select(
-        `
-        id,
-        token_number,
-        status,
-        booked_at,
-        slot:slots (
-          id,
-          slot_date,
-          start_time,
-          end_time,
-          centre:procurement_centres (
-            id,
-            centre_code,
-            name,
-            address,
-            district,
-            state,
-            pincode
-          )
-        )
-        `
-      )
-      .eq("id", id)
-      .eq("farmer_id", user.id)
-      .single();
-
-  if (error || !booking) {
-    console.error(
-      "Booking fetch error:",
-      error?.message
-    );
-
-    notFound();
-  }
-
-  const slot = Array.isArray(booking.slot)
-    ? booking.slot[0]
-    : booking.slot;
-
-  if (!slot) {
-    notFound();
-  }
-
-  const centre = Array.isArray(slot.centre)
-    ? slot.centre[0]
-    : slot.centre;
-
-  if (!centre) {
-    notFound();
-  }
-
-  const slotDate = new Date(
-    `${slot.slot_date}T00:00:00`
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(
+    null
   );
 
-  const formattedDate =
-    slotDate.toLocaleDateString("en-IN", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
+  useEffect(() => {
+    async function loadBooking() {
+      try {
+        setLoading(true);
+        setError(null);
 
-  const startTime = slot.start_time.slice(0, 5);
-  const endTime = slot.end_time.slice(0, 5);
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
 
-  return (
-    <main className="min-h-screen bg-[var(--color-background)] py-10">
-      <Container>
-        <div className="mx-auto max-w-2xl">
-          {/* Success */}
-          <div className="mb-8 text-center">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-primary-light)]">
-              <CheckCircle2
-                size={34}
-                className="text-[var(--color-primary)]"
-              />
-            </div>
+        if (
+          sessionError ||
+          !session?.access_token
+        ) {
+          setError(
+            "Your session has expired. Please log in again."
+          );
+          return;
+        }
 
-            <h1 className="mt-5 text-3xl font-bold tracking-tight">
-              Slot Booked Successfully!
+        const response = await fetch(
+          `${API_URL}/api/bookings/${bookingId}`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+          setError(
+            result.error ||
+              "Unable to load booking details."
+          );
+          return;
+        }
+
+        const bookingData =
+          result.data as Booking;
+
+        setBooking(bookingData);
+
+        const centre =
+          bookingData.slot.centre;
+
+        const qrData = JSON.stringify({
+          booking_id: bookingData.id,
+          gate_pass_number:
+            bookingData.gate_pass_number,
+          token_number:
+            bookingData.token_number,
+          centre_code:
+            centre.centre_code,
+        });
+
+        const generatedQr =
+          await QRCode.toDataURL(qrData, {
+            width: 280,
+            margin: 2,
+            errorCorrectionLevel: "M",
+          });
+
+        setQrCode(generatedQr);
+      } catch (error) {
+        console.error(
+          "Load booking details error:",
+          error
+        );
+
+        setError(
+          "Unable to connect to the booking service."
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    if (bookingId) {
+      loadBooking();
+    }
+  }, [bookingId, supabase]);
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-[var(--color-background)] px-4 py-10">
+        <div className="mx-auto max-w-3xl animate-pulse">
+          <div className="mb-6 h-6 w-32 rounded bg-gray-200" />
+          <div className="h-[700px] rounded-3xl bg-gray-200" />
+        </div>
+      </main>
+    );
+  }
+
+  if (error || !booking) {
+    return (
+      <main className="min-h-screen bg-[var(--color-background)] px-4 py-10">
+        <div className="mx-auto max-w-3xl">
+          <div className="rounded-3xl border border-red-200 bg-red-50 p-8 text-center">
+            <Ticket
+              size={44}
+              className="mx-auto text-red-400"
+            />
+
+            <h1 className="mt-4 text-2xl font-bold text-red-800">
+              Booking Not Found
             </h1>
 
-            <p className="mt-2 text-[var(--color-text-secondary)]">
-              Your procurement visit has been
-              confirmed.
+            <p className="mt-2 text-sm text-red-600">
+              {error ||
+                "We couldn't find this booking."}
             </p>
+
+            <Link
+              href="/my-booking"
+              className="mt-6 inline-flex rounded-xl bg-[var(--color-primary)] px-5 py-3 text-sm font-semibold text-white"
+            >
+              Back to My Booking
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const centre = booking.slot.centre;
+
+  const formattedDate = new Date(
+    `${booking.slot.slot_date}T00:00:00`
+  ).toLocaleDateString("en-IN", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
+  const formattedStartTime =
+    booking.slot.start_time.slice(0, 5);
+
+  const formattedEndTime =
+    booking.slot.end_time.slice(0, 5);
+
+  return (
+    <main className="min-h-screen bg-[var(--color-background)] px-4 py-8">
+      <div className="mx-auto max-w-3xl">
+        <Link
+          href="/my-booking"
+          className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-[var(--color-primary)]"
+        >
+          <ArrowLeft size={18} />
+          Back to My Booking
+        </Link>
+
+        <div className="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm">
+          <div className="bg-[var(--color-primary)] px-6 py-7 text-white">
+            <p className="text-sm opacity-90">
+              Your Token
+            </p>
+
+            <p className="mt-1 text-5xl font-bold">
+              #{booking.token_number}
+            </p>
+
+            <div className="mt-4 inline-flex rounded-full bg-white/20 px-4 py-1.5 text-sm font-medium capitalize">
+              {booking.status}
+            </div>
           </div>
 
-          {/* Token */}
-          <Card className="overflow-hidden">
-            <div className="bg-[var(--color-primary)] px-6 py-8 text-center text-white">
-              <div className="flex items-center justify-center gap-2 text-sm font-medium opacity-90">
-                <Ticket size={18} />
-                Your Token Number
+          <div className="space-y-7 p-6">
+            {qrCode && (
+              <div className="rounded-2xl border border-gray-200 p-6 text-center">
+                <div className="mb-4 flex items-center justify-center gap-2">
+                  <QrCode
+                    size={20}
+                    className="text-[var(--color-primary)]"
+                  />
+
+                  <h2 className="font-semibold text-gray-900">
+                    Gate Verification QR
+                  </h2>
+                </div>
+
+                <img
+                  src={qrCode}
+                  alt="Booking verification QR code"
+                  className="mx-auto h-[280px] w-[280px]"
+                />
+
+                <p className="mt-4 text-xs text-gray-500">
+                  Show this QR code at the procurement
+                  centre gate.
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-4">
+              <div className="rounded-xl bg-green-50 p-3">
+                <MapPin
+                  size={22}
+                  className="text-[var(--color-primary)]"
+                />
               </div>
 
-              <p className="mt-2 text-5xl font-bold tracking-tight">
-                A-{String(
-                  booking.token_number
-                ).padStart(3, "0")}
-              </p>
+              <div>
+                <p className="text-sm text-gray-500">
+                  Procurement Centre
+                </p>
 
-              <p className="mt-2 text-sm opacity-90">
-                Keep this token number safe.
-              </p>
+                <h2 className="font-semibold text-gray-900">
+                  {centre.name}
+                </h2>
+
+                <p className="mt-1 text-sm text-gray-600">
+                  {centre.address},{" "}
+                  {centre.district},{" "}
+                  {centre.state} - {centre.pincode}
+                </p>
+
+                <p className="mt-1 text-xs font-medium text-gray-500">
+                  Centre Code:{" "}
+                  {centre.centre_code}
+                </p>
+              </div>
             </div>
 
-            <div className="space-y-5 p-6 sm:p-8">
-              {/* Centre */}
-              <div className="flex gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-primary-light)]">
-                  <MapPin
-                    size={19}
-                    className="text-[var(--color-primary)]"
-                  />
-                </div>
-
-                <div>
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    Procurement Centre
-                  </p>
-
-                  <p className="mt-1 font-semibold">
-                    {centre.name}
-                  </p>
-
-                  <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-                    {centre.address}
-                  </p>
-
-                  <p className="text-sm text-[var(--color-text-secondary)]">
-                    {centre.district},{" "}
-                    {centre.state}
-                    {centre.pincode
-                      ? ` - ${centre.pincode}`
-                      : ""}
-                  </p>
-                </div>
-              </div>
-
-              {/* Date */}
-              <div className="flex gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-primary-light)]">
+            <div className="space-y-4">
+              <div className="flex gap-4">
+                <div className="rounded-xl bg-green-50 p-3">
                   <CalendarDays
-                    size={19}
+                    size={22}
                     className="text-[var(--color-primary)]"
                   />
                 </div>
 
                 <div>
-                  <p className="text-xs text-[var(--color-text-muted)]">
+                  <p className="text-sm text-gray-500">
                     Visit Date
                   </p>
 
-                  <p className="mt-1 font-semibold">
+                  <p className="font-semibold text-gray-900">
                     {formattedDate}
                   </p>
                 </div>
               </div>
 
-              {/* Time */}
-              <div className="flex gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-primary-light)]">
+              <div className="flex gap-4">
+                <div className="rounded-xl bg-green-50 p-3">
                   <Clock
-                    size={19}
+                    size={22}
                     className="text-[var(--color-primary)]"
                   />
                 </div>
 
                 <div>
-                  <p className="text-xs text-[var(--color-text-muted)]">
+                  <p className="text-sm text-gray-500">
                     Time Slot
                   </p>
 
-                  <p className="mt-1 font-semibold">
-                    {startTime} – {endTime}
+                  <p className="font-semibold text-gray-900">
+                    {formattedStartTime} –{" "}
+                    {formattedEndTime}
                   </p>
                 </div>
               </div>
+            </div>
 
-              {/* Status */}
-              <div className="border-t border-[var(--color-border)] pt-5">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-[var(--color-text-secondary)]">
-                    Booking status
-                  </span>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-2xl border border-gray-200 p-4">
+                <div className="flex items-center gap-2">
+                  <Users
+                    size={18}
+                    className="text-gray-500"
+                  />
 
-                  <span className="rounded-full bg-[var(--color-primary-light)] px-3 py-1 text-xs font-semibold capitalize text-[var(--color-primary)]">
-                    {booking.status}
-                  </span>
+                  <p className="text-sm text-gray-500">
+                    Queue Position
+                  </p>
                 </div>
+
+                <p className="mt-2 text-xl font-bold text-gray-900">
+                  {booking.queue_position
+                    ? `#${booking.queue_position}`
+                    : "Not assigned"}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 p-4">
+                <div className="flex items-center gap-2">
+                  <Scale
+                    size={18}
+                    className="text-gray-500"
+                  />
+
+                  <p className="text-sm text-gray-500">
+                    Estimated Quantity
+                  </p>
+                </div>
+
+                <p className="mt-2 text-xl font-bold text-gray-900">
+                  {booking.estimated_quantity_qtl
+                    ? `${booking.estimated_quantity_qtl} Qtl`
+                    : "Not provided"}
+                </p>
               </div>
             </div>
-          </Card>
 
-          {/* Actions */}
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            <Link
-              href="/centres"
-              className="rounded-xl border border-[var(--color-border)] bg-white px-5 py-3 text-center text-sm font-semibold text-[var(--color-text-primary)] transition hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
-            >
-              Find Another Centre
-            </Link>
+            <div className="rounded-2xl bg-green-50 p-5">
+              <p className="text-xs font-medium text-green-700">
+                Current Stage
+              </p>
+
+              <p className="mt-1 text-xl font-bold capitalize text-green-900">
+                {booking.current_stage ||
+                  "Booking"}
+              </p>
+            </div>
+
+            {booking.gate_pass_number && (
+              <div className="rounded-2xl border border-gray-200 p-5">
+                <p className="text-xs font-medium text-gray-500">
+                  Gate Pass Number
+                </p>
+
+                <p className="mt-1 font-mono text-lg font-bold text-gray-900">
+                  {booking.gate_pass_number}
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3 rounded-2xl bg-gray-50 p-4">
+              <Ticket
+                size={20}
+                className="mt-0.5 text-gray-500"
+              />
+
+              <div>
+                <p className="text-sm font-medium text-gray-700">
+                  Keep this booking information
+                  available when you visit the
+                  procurement centre.
+                </p>
+
+                <p className="mt-1 text-xs text-gray-500">
+                  Your token and QR code will be used
+                  for gate verification.
+                </p>
+              </div>
+            </div>
 
             <Link
-              href="/"
-              className="rounded-xl bg-[var(--color-primary)] px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-[var(--color-primary-dark)]"
+              href="/my-queue"
+              className="block w-full rounded-xl bg-[var(--color-primary)] px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-[var(--color-primary-dark)]"
             >
-              Go to Home
+              View Live Queue
             </Link>
           </div>
         </div>
-      </Container>
+      </div>
     </main>
   );
 }
