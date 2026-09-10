@@ -6,13 +6,17 @@ import QRCode from "qrcode";
 import {
   ArrowLeft,
   CalendarDays,
+  CheckCircle2,
   Clock,
+  IndianRupee,
+  Loader2,
   MapPin,
   QrCode,
   Scale,
   Ticket,
   Users,
   Wheat,
+  XCircle,
 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -32,15 +36,18 @@ type Booking = {
   gate_pass_number: string | null;
   queue_position: number | null;
   current_stage: string | null;
+
   commodity: {
     id: string;
     name: string;
   } | null;
+
   slot: {
     id: string;
     slot_date: string;
     start_time: string;
     end_time: string;
+
     centre: {
       id: string;
       centre_code: string;
@@ -53,6 +60,162 @@ type Booking = {
   };
 };
 
+type ProcurementTransaction = {
+  id: string;
+  booking_id: string;
+  crop_name: string;
+  quantity_kg: number;
+  rate_per_kg: number;
+  gross_amount: number;
+  deductions: number;
+  net_amount: number;
+  status: string;
+  receipt_number: string | null;
+  j_form_number: string | null;
+  payment_status:
+    | "pending"
+    | "processing"
+    | "credited"
+    | "failed";
+  payment_reference: string | null;
+  payment_initiated_at: string | null;
+  payment_completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return "—";
+  }
+
+  return new Date(value).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getPaymentLabel(
+  status: ProcurementTransaction["payment_status"]
+) {
+  switch (status) {
+    case "pending":
+      return "Payment Pending";
+
+    case "processing":
+      return "Payment Processing";
+
+    case "credited":
+      return "Payment Credited";
+
+    case "failed":
+      return "Payment Failed";
+
+    default:
+      return status;
+  }
+}
+
+function getPaymentClass(
+  status: ProcurementTransaction["payment_status"]
+) {
+  switch (status) {
+    case "pending":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+
+    case "processing":
+      return "border-blue-200 bg-blue-50 text-blue-700";
+
+    case "credited":
+      return "border-green-200 bg-green-50 text-green-700";
+
+    case "failed":
+      return "border-red-200 bg-red-50 text-red-700";
+
+    default:
+      return "border-gray-200 bg-gray-50 text-gray-700";
+  }
+}
+
+function getBookingStatusClass(status: string) {
+  switch (status) {
+    case "waiting":
+      return "bg-amber-50 text-amber-700";
+
+    case "called":
+      return "bg-blue-50 text-blue-700";
+
+    case "arrived":
+      return "bg-purple-50 text-purple-700";
+
+    case "inspected":
+      return "bg-indigo-50 text-indigo-700";
+
+    case "accepted":
+      return "bg-green-50 text-green-700";
+
+    case "payment":
+      return "bg-emerald-50 text-emerald-700";
+
+    case "completed":
+      return "bg-green-100 text-green-800";
+
+    case "rejected":
+      return "bg-red-50 text-red-700";
+
+    default:
+      return "bg-gray-100 text-gray-700";
+  }
+}
+
+function getBookingStatusLabel(status: string) {
+  switch (status) {
+    case "booked":
+      return "Booked";
+
+    case "waiting":
+      return "Waiting";
+
+    case "called":
+      return "Called";
+
+    case "arrived":
+      return "At Centre";
+
+    case "inspected":
+      return "Quality Inspection";
+
+    case "accepted":
+      return "Accepted";
+
+    case "payment":
+      return "Payment Pending";
+
+    case "completed":
+      return "Completed";
+
+    case "rejected":
+      return "Rejected";
+
+    case "skipped":
+      return "Skipped";
+
+    default:
+      return status;
+  }
+}
+
 export default function BookingDetailsPage() {
   const params = useParams();
   const bookingId = params.id as string;
@@ -62,60 +225,71 @@ export default function BookingDetailsPage() {
   const [booking, setBooking] =
     useState<Booking | null>(null);
 
+  const [transaction, setTransaction] =
+    useState<ProcurementTransaction | null>(null);
+
   const [qrCode, setQrCode] =
     useState<string | null>(null);
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(
-    null
-  );
+  const [loading, setLoading] =
+    useState(true);
 
-  useEffect(() => {
-    async function loadBooking() {
-      try {
-        setLoading(true);
-        setError(null);
+  const [paymentLoading, setPaymentLoading] =
+    useState(false);
 
-        const {
-          data: { session },
-          error: sessionError,
-        } = await supabase.auth.getSession();
+  const [error, setError] =
+    useState<string | null>(null);
 
-        if (
-          sessionError ||
-          !session?.access_token
-        ) {
-          setError(
-            "Your session has expired. Please log in again."
-          );
-          return;
-        }
+  const [paymentError, setPaymentError] =
+    useState<string | null>(null);
 
-        const response = await fetch(
-          `${API_URL}/api/bookings/${bookingId}`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
-          }
+  async function loadBooking() {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (
+        sessionError ||
+        !session?.access_token
+      ) {
+        setError(
+          "Your session has expired. Please log in again."
         );
+        return;
+      }
 
-        const result = await response.json();
-
-        if (!response.ok || !result.success) {
-          setError(
-            result.error ||
-              "Unable to load booking details."
-          );
-          return;
+      const response = await fetch(
+        `${API_URL}/api/bookings/${bookingId}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          cache: "no-store",
         }
+      );
 
-        const bookingData =
-          result.data as Booking;
+      const result = await response.json();
 
-        setBooking(bookingData);
+      if (!response.ok || !result.success) {
+        setError(
+          result.error ||
+            "Unable to load booking details."
+        );
+        return;
+      }
 
+      const bookingData =
+        result.data as Booking;
+
+      setBooking(bookingData);
+
+      if (bookingData.slot?.centre) {
         const centre =
           bookingData.slot.centre;
 
@@ -137,31 +311,142 @@ export default function BookingDetailsPage() {
           });
 
         setQrCode(generatedQr);
-      } catch (error) {
-        console.error(
-          "Load booking details error:",
-          error
-        );
-
-        setError(
-          "Unable to connect to the booking service."
-        );
-      } finally {
-        setLoading(false);
       }
+    } catch (error) {
+      console.error(
+        "Load booking details error:",
+        error
+      );
+
+      setError(
+        "Unable to connect to the booking service."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadTransaction() {
+    try {
+      setPaymentLoading(true);
+      setPaymentError(null);
+
+      const {
+        data,
+        error: queryError,
+      } = await supabase
+        .from("procurement_transactions")
+        .select(
+          `
+          id,
+          booking_id,
+          crop_name,
+          quantity_kg,
+          rate_per_kg,
+          gross_amount,
+          deductions,
+          net_amount,
+          status,
+          receipt_number,
+          j_form_number,
+          payment_status,
+          payment_reference,
+          payment_initiated_at,
+          payment_completed_at,
+          created_at,
+          updated_at
+        `
+        )
+        .eq("booking_id", bookingId)
+        .maybeSingle();
+
+      if (queryError) {
+        throw queryError;
+      }
+
+      setTransaction(
+        data as ProcurementTransaction | null
+      );
+    } catch (error) {
+      console.error(
+        "Load procurement transaction error:",
+        error
+      );
+
+      setPaymentError(
+        "Procurement payment details are not available yet."
+      );
+    } finally {
+      setPaymentLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!bookingId) {
+      return;
     }
 
-    if (bookingId) {
-      loadBooking();
-    }
-  }, [bookingId, supabase]);
+    loadBooking();
+    loadTransaction();
+
+    const bookingChannel =
+      supabase
+        .channel(
+          `farmer-booking-${bookingId}`
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "bookings",
+            filter: `id=eq.${bookingId}`,
+          },
+          () => {
+            loadBooking();
+            loadTransaction();
+          }
+        )
+        .subscribe();
+
+    const paymentChannel =
+      supabase
+        .channel(
+          `farmer-payment-${bookingId}`
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "procurement_transactions",
+            filter: `booking_id=eq.${bookingId}`,
+          },
+          () => {
+            loadTransaction();
+            loadBooking();
+          }
+        )
+        .subscribe();
+
+    return () => {
+      supabase.removeChannel(
+        bookingChannel
+      );
+
+      supabase.removeChannel(
+        paymentChannel
+      );
+    };
+  }, [bookingId]);
 
   if (loading) {
     return (
       <main className="min-h-screen bg-[var(--color-background)] px-4 py-10">
         <div className="mx-auto max-w-3xl animate-pulse">
           <div className="mb-6 h-6 w-32 rounded bg-gray-200" />
-          <div className="h-[700px] rounded-3xl bg-gray-200" />
+
+          <div className="h-[900px] rounded-3xl bg-gray-200" />
         </div>
       </main>
     );
@@ -227,6 +512,8 @@ export default function BookingDetailsPage() {
         </Link>
 
         <div className="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm">
+          {/* Token Header */}
+
           <div className="bg-[var(--color-primary)] px-6 py-7 text-white">
             <p className="text-sm opacity-90">
               Your Token
@@ -236,12 +523,20 @@ export default function BookingDetailsPage() {
               #{booking.token_number}
             </p>
 
-            <div className="mt-4 inline-flex rounded-full bg-white/20 px-4 py-1.5 text-sm font-medium capitalize">
-              {booking.status}
+            <div
+              className={`mt-4 inline-flex rounded-full px-4 py-1.5 text-sm font-medium ${getBookingStatusClass(
+                booking.status
+              )}`}
+            >
+              {getBookingStatusLabel(
+                booking.status
+              )}
             </div>
           </div>
 
           <div className="space-y-7 p-6">
+            {/* QR */}
+
             {qrCode && (
               <div className="rounded-2xl border border-gray-200 p-6 text-center">
                 <div className="mb-4 flex items-center justify-center gap-2">
@@ -268,6 +563,8 @@ export default function BookingDetailsPage() {
               </div>
             )}
 
+            {/* Centre */}
+
             <div className="flex gap-4">
               <div className="rounded-xl bg-green-50 p-3">
                 <MapPin
@@ -288,7 +585,8 @@ export default function BookingDetailsPage() {
                 <p className="mt-1 text-sm text-gray-600">
                   {centre.address},{" "}
                   {centre.district},{" "}
-                  {centre.state} - {centre.pincode}
+                  {centre.state} -{" "}
+                  {centre.pincode}
                 </p>
 
                 <p className="mt-1 text-xs font-medium text-gray-500">
@@ -297,6 +595,8 @@ export default function BookingDetailsPage() {
                 </p>
               </div>
             </div>
+
+            {/* Date / Time */}
 
             <div className="space-y-4">
               <div className="flex gap-4">
@@ -338,6 +638,8 @@ export default function BookingDetailsPage() {
                 </div>
               </div>
             </div>
+
+            {/* Booking Information */}
 
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="rounded-2xl border border-gray-200 p-4">
@@ -397,6 +699,8 @@ export default function BookingDetailsPage() {
               </div>
             </div>
 
+            {/* Current Stage */}
+
             <div className="rounded-2xl bg-green-50 p-5">
               <p className="text-xs font-medium text-green-700">
                 Current Stage
@@ -407,6 +711,8 @@ export default function BookingDetailsPage() {
                   "Booking"}
               </p>
             </div>
+
+            {/* Gate Pass */}
 
             {booking.gate_pass_number && (
               <div className="rounded-2xl border border-gray-200 p-5">
@@ -420,10 +726,258 @@ export default function BookingDetailsPage() {
               </div>
             )}
 
+            {/* =====================================================
+                PROCUREMENT & PAYMENT
+            ===================================================== */}
+
+            {paymentLoading ? (
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
+                <div className="flex items-center gap-3 text-sm text-gray-600">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading procurement payment details...
+                </div>
+              </div>
+            ) : transaction ? (
+              <section className="overflow-hidden rounded-2xl border border-green-200">
+                <div className="border-b border-green-100 bg-green-50 px-5 py-4">
+                  <div className="flex items-center gap-2">
+                    <IndianRupee
+                      size={20}
+                      className="text-green-700"
+                    />
+
+                    <div>
+                      <h2 className="font-semibold text-green-900">
+                        Procurement & Payment
+                      </h2>
+
+                      <p className="mt-0.5 text-xs text-green-700">
+                        Final procurement amount and payment status
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-5 p-5">
+                  {/* Amount Summary */}
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <p className="text-xs text-gray-500">
+                        Final Quantity
+                      </p>
+
+                      <p className="mt-1 text-lg font-bold text-gray-900">
+                        {Number(
+                          transaction.quantity_kg
+                        ).toLocaleString("en-IN")}{" "}
+                        kg
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <p className="text-xs text-gray-500">
+                        Procurement Rate
+                      </p>
+
+                      <p className="mt-1 text-lg font-bold text-gray-900">
+                        {formatCurrency(
+                          Number(
+                            transaction.rate_per_kg
+                          )
+                        )}{" "}
+                        / kg
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <p className="text-xs text-gray-500">
+                        Gross Amount
+                      </p>
+
+                      <p className="mt-1 text-lg font-bold text-gray-900">
+                        {formatCurrency(
+                          Number(
+                            transaction.gross_amount
+                          )
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-gray-200 p-4">
+                      <p className="text-xs text-gray-500">
+                        Deductions
+                      </p>
+
+                      <p className="mt-1 text-lg font-bold text-gray-900">
+                        {formatCurrency(
+                          Number(
+                            transaction.deductions
+                          )
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Net Amount */}
+
+                  <div className="rounded-2xl border border-green-200 bg-green-50 p-5">
+                    <p className="text-xs font-medium text-green-700">
+                      Net Procurement Amount
+                    </p>
+
+                    <p className="mt-1 text-3xl font-bold text-green-900">
+                      {formatCurrency(
+                        Number(
+                          transaction.net_amount
+                        )
+                      )}
+                    </p>
+                  </div>
+
+                  {/* Payment Status */}
+
+                  <div
+                    className={`rounded-2xl border p-5 ${getPaymentClass(
+                      transaction.payment_status
+                    )}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      {transaction.payment_status ===
+                      "credited" ? (
+                        <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0" />
+                      ) : transaction.payment_status ===
+                        "failed" ? (
+                        <XCircle className="mt-0.5 h-6 w-6 shrink-0" />
+                      ) : transaction.payment_status ===
+                        "processing" ? (
+                        <Loader2 className="mt-0.5 h-6 w-6 shrink-0 animate-spin" />
+                      ) : (
+                        <Clock className="mt-0.5 h-6 w-6 shrink-0" />
+                      )}
+
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold">
+                          {getPaymentLabel(
+                            transaction.payment_status
+                          )}
+                        </p>
+
+                        <p className="mt-1 text-sm opacity-90">
+                          {transaction.payment_status ===
+                          "pending"
+                            ? "Your procurement has been completed. Payment is waiting to be processed."
+                            : transaction.payment_status ===
+                              "processing"
+                            ? "Your payment is currently being processed through the PFMS/DBT payment system."
+                            : transaction.payment_status ===
+                              "credited"
+                            ? "The procurement payment has been credited successfully."
+                            : "There was a problem processing the payment. Please contact the procurement centre."}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Payment Details */}
+
+                  {transaction.payment_reference && (
+                    <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div>
+                          <p className="text-xs text-blue-600">
+                            Payment Reference
+                          </p>
+
+                          <p className="mt-1 break-all font-mono text-sm font-semibold text-blue-900">
+                            {
+                              transaction.payment_reference
+                            }
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-xs text-blue-600">
+                            Payment Initiated
+                          </p>
+
+                          <p className="mt-1 text-sm font-semibold text-blue-900">
+                            {formatDateTime(
+                              transaction.payment_initiated_at
+                            )}
+                          </p>
+                        </div>
+
+                        {transaction.payment_completed_at && (
+                          <div>
+                            <p className="text-xs text-blue-600">
+                              Payment Credited
+                            </p>
+
+                            <p className="mt-1 text-sm font-semibold text-blue-900">
+                              {formatDateTime(
+                                transaction.payment_completed_at
+                              )}
+                            </p>
+                          </div>
+                        )}
+
+                        {transaction.receipt_number && (
+                          <div>
+                            <p className="text-xs text-blue-600">
+                              Receipt Number
+                            </p>
+
+                            <p className="mt-1 font-mono text-sm font-semibold text-blue-900">
+                              {
+                                transaction.receipt_number
+                              }
+                            </p>
+                          </div>
+                        )}
+
+                        {transaction.j_form_number && (
+                          <div>
+                            <p className="text-xs text-blue-600">
+                              J-Form Number
+                            </p>
+
+                            <p className="mt-1 font-mono text-sm font-semibold text-blue-900">
+                              {
+                                transaction.j_form_number
+                              }
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+            ) : paymentError ? (
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
+                <div className="flex items-start gap-3">
+                  <IndianRupee className="mt-0.5 h-5 w-5 text-gray-500" />
+
+                  <div>
+                    <p className="font-medium text-gray-700">
+                      Procurement Payment
+                    </p>
+
+                    <p className="mt-1 text-sm text-gray-500">
+                      Payment details will appear here after your procurement transaction is created.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {/* Information */}
+
             <div className="flex gap-3 rounded-2xl bg-gray-50 p-4">
               <Ticket
                 size={20}
-                className="mt-0.5 text-gray-500"
+                className="mt-0.5 shrink-0 text-gray-500"
               />
 
               <div>
