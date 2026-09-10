@@ -1,29 +1,54 @@
 import { NextResponse } from "next/server";
+
 import { createClient } from "@/lib/supabase/server";
 
-export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
+export async function GET(
+  request: Request
+) {
+  const requestUrl = new URL(request.url);
 
-  const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/";
+  const code =
+    requestUrl.searchParams.get(
+      "code"
+    );
 
   if (!code) {
     return NextResponse.redirect(
-      `${origin}/login?error=missing_auth_code`
+      new URL(
+        "/login?error=missing_code",
+        requestUrl.origin
+      )
     );
   }
 
-  const supabase = await createClient();
+  const supabase =
+    await createClient();
 
-  const { error } = await supabase.auth.exchangeCodeForSession(code);
+  const {
+    error,
+  } =
+    await supabase.auth.exchangeCodeForSession(
+      code
+    );
 
   if (error) {
-    console.error("OAuth callback error:", error.message);
+    console.error(
+      "Auth callback error:",
+      error.message
+    );
 
     return NextResponse.redirect(
-      `${origin}/login?error=auth_callback_failed`
+      new URL(
+        "/login?error=auth_callback",
+        requestUrl.origin
+      )
     );
   }
 
-  return NextResponse.redirect(`${origin}${next}`);
+  return NextResponse.redirect(
+    new URL(
+      "/account",
+      requestUrl.origin
+    )
+  );
 }
