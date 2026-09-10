@@ -1,10 +1,11 @@
-import BookSlotButton from "@/components/farmer/BookSlotButton";
 import { createClient } from "@/lib/supabase/server";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, MapPin, Users } from "lucide-react";
+
 import { Container } from "@/components/ui/Container";
 import { Card } from "@/components/ui/Card";
+import AvailableSlots from "@/components/farmer/AvailableSlots";
 
 type CentrePageProps = {
   params: Promise<{
@@ -12,7 +13,9 @@ type CentrePageProps = {
   }>;
 };
 
-export default async function CentrePage({ params }: CentrePageProps) {
+export default async function CentrePage({
+  params,
+}: CentrePageProps) {
   const { id } = await params;
 
   const supabase = await createClient();
@@ -27,53 +30,61 @@ export default async function CentrePage({ params }: CentrePageProps) {
   }
 
   // Fetch centre
-  const { data: centre, error: centreError } = await supabase
-    .from("procurement_centres")
-    .select(
-      `
-        id,
-        centre_code,
-        name,
-        state,
-        district,
-        address,
-        pincode,
-        latitude,
-        longitude,
-        daily_capacity,
-        is_active
-        `,
-    )
-    .eq("id", id)
-    .eq("is_active", true)
-    .single();
+  const { data: centre, error: centreError } =
+    await supabase
+      .from("procurement_centres")
+      .select(
+        `
+          id,
+          centre_code,
+          name,
+          state,
+          district,
+          address,
+          pincode,
+          latitude,
+          longitude,
+          daily_capacity,
+          is_active
+        `
+      )
+      .eq("id", id)
+      .eq("is_active", true)
+      .single();
 
   if (centreError || !centre) {
     notFound();
   }
 
   // Fetch active slots for this centre
-  const { data: slots, error: slotsError } = await supabase
-    .from("slots")
-    .select(
-      `
-        id,
-        slot_date,
-        start_time,
-        end_time,
-        capacity,
-        booked_count,
-        is_active
-        `,
-    )
-    .eq("centre_id", centre.id)
-    .eq("is_active", true)
-    .gte("slot_date", new Date().toISOString().split("T")[0])
-    .order("slot_date")
-    .order("start_time");
+  const { data: slots, error: slotsError } =
+    await supabase
+      .from("slots")
+      .select(
+        `
+          id,
+          slot_date,
+          start_time,
+          end_time,
+          capacity,
+          booked_count,
+          is_active
+        `
+      )
+      .eq("centre_id", centre.id)
+      .eq("is_active", true)
+      .gte(
+        "slot_date",
+        new Date().toISOString().split("T")[0]
+      )
+      .order("slot_date")
+      .order("start_time");
 
   if (slotsError) {
-    console.error("Slot fetch error:", slotsError.message);
+    console.error(
+      "Slot fetch error:",
+      slotsError.message
+    );
   }
 
   const safeSlots = slots ?? [];
@@ -114,8 +125,11 @@ export default async function CentrePage({ params }: CentrePageProps) {
                       <p>{centre.address}</p>
 
                       <p className="mt-1">
-                        {centre.district}, {centre.state}
-                        {centre.pincode ? ` - ${centre.pincode}` : ""}
+                        {centre.district},{" "}
+                        {centre.state}
+                        {centre.pincode
+                          ? ` - ${centre.pincode}`
+                          : ""}
                       </p>
                     </div>
                   </div>
@@ -145,7 +159,8 @@ export default async function CentrePage({ params }: CentrePageProps) {
                   </div>
 
                   <p className="mt-1 text-sm font-semibold">
-                    {centre.district}, {centre.state}
+                    {centre.district},{" "}
+                    {centre.state}
                   </p>
                 </div>
               </div>
@@ -155,76 +170,17 @@ export default async function CentrePage({ params }: CentrePageProps) {
           {/* Slots */}
           <div className="mt-8">
             <div className="mb-5">
-              <h2 className="text-xl font-bold">Available Slots</h2>
+              <h2 className="text-xl font-bold">
+                Book a Procurement Slot
+              </h2>
 
               <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-                Choose a convenient time for your visit.
+                Select a date first, then choose a convenient
+                time for your visit.
               </p>
             </div>
 
-            {safeSlots.length === 0 ? (
-              <Card className="p-8 text-center">
-                <p className="font-medium">No slots are currently available.</p>
-
-                <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-                  Please check again later or choose another procurement centre.
-                </p>
-              </Card>
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2">
-                {safeSlots.map((slot) => {
-                  const remaining = slot.capacity - slot.booked_count;
-
-                  const slotDate = new Date(`${slot.slot_date}T00:00:00`);
-
-                  const formattedDate = slotDate.toLocaleDateString("en-IN", {
-                    day: "numeric",
-                    month: "short",
-                    year: "numeric",
-                  });
-
-                  const formattedStart = slot.start_time.slice(0, 5);
-
-                  const formattedEnd = slot.end_time.slice(0, 5);
-
-                  const isFull = remaining <= 0;
-
-                  return (
-                    <Card key={slot.id} hover={!isFull} className="p-5">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-[var(--color-primary)]">
-                            {formattedDate}
-                          </p>
-
-                          <h3 className="mt-1 text-lg font-bold">
-                            {formattedStart} – {formattedEnd}
-                          </h3>
-                        </div>
-
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                            isFull
-                              ? "bg-red-50 text-red-700"
-                              : "bg-[var(--color-primary-light)] text-[var(--color-primary)]"
-                          }`}
-                        >
-                          {isFull ? "Full" : `${remaining} left`}
-                        </span>
-                      </div>
-
-                      <div className="mt-5 flex items-center justify-between border-t border-[var(--color-border)] pt-4">
-                        <span className="text-sm text-[var(--color-text-secondary)]">
-                          {slot.booked_count} / {slot.capacity} booked
-                        </span>
-
-                        <BookSlotButton slotId={slot.id} disabled={isFull} />
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
+            <AvailableSlots slots={safeSlots} />
           </div>
         </div>
       </Container>

@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 
 type BookSlotButtonProps = {
   slotId: string;
+  commodityId: string;
+  estimatedQuantityQtl: number;
   disabled?: boolean;
 };
 
@@ -16,18 +18,41 @@ const API_URL =
 
 export default function BookSlotButton({
   slotId,
+  commodityId,
+  estimatedQuantityQtl,
   disabled = false,
 }: BookSlotButtonProps) {
   const router = useRouter();
   const supabase = createClient();
 
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(
-    null
-  );
+  const [error, setError] =
+    useState<string | null>(null);
 
   async function handleBookSlot() {
     if (loading || disabled) {
+      return;
+    }
+
+    if (!commodityId) {
+      setError("Please select a crop.");
+      return;
+    }
+
+    if (
+      !Number.isFinite(estimatedQuantityQtl) ||
+      estimatedQuantityQtl <= 0
+    ) {
+      setError(
+        "Please enter a valid quantity greater than 0 QTL."
+      );
+      return;
+    }
+
+    if (estimatedQuantityQtl > 1000) {
+      setError(
+        "Quantity cannot be more than 1000 QTL."
+      );
       return;
     }
 
@@ -40,7 +65,10 @@ export default function BookSlotButton({
         error: sessionError,
       } = await supabase.auth.getSession();
 
-      if (sessionError || !session?.access_token) {
+      if (
+        sessionError ||
+        !session?.access_token
+      ) {
         setError(
           "Your session has expired. Please log in again."
         );
@@ -58,6 +86,9 @@ export default function BookSlotButton({
           },
           body: JSON.stringify({
             slot_id: slotId,
+            commodity_id: commodityId,
+            estimated_quantity_qtl:
+              estimatedQuantityQtl,
           }),
         }
       );
@@ -88,7 +119,9 @@ export default function BookSlotButton({
         return;
       }
 
-      router.push(`/booking/${booking.id}`);
+      router.push(
+        `/booking/${booking.id}`
+      );
     } catch (error) {
       console.error(
         "Unexpected booking error:",
@@ -126,7 +159,7 @@ export default function BookSlotButton({
       </button>
 
       {error && (
-        <p className="max-w-[220px] text-right text-xs text-red-600">
+        <p className="max-w-[240px] text-right text-xs text-red-600">
           {error}
         </p>
       )}
