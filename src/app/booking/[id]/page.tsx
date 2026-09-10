@@ -12,6 +12,7 @@ import {
   Scale,
   Ticket,
   Users,
+  Wheat,
 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -25,11 +26,16 @@ type Booking = {
   token_number: number;
   status: string;
   booked_at: string;
+  commodity_id: string | null;
   estimated_quantity_qtl: number | null;
   qr_token: string | null;
   gate_pass_number: string | null;
   queue_position: number | null;
   current_stage: string | null;
+  commodity: {
+    id: string;
+    name: string;
+  } | null;
   slot: {
     id: string;
     slot_date: string;
@@ -333,7 +339,7 @@ export default function BookingDetailsPage() {
               </div>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
               <div className="rounded-2xl border border-gray-200 p-4">
                 <div className="flex items-center gap-2">
                   <Users
@@ -350,6 +356,24 @@ export default function BookingDetailsPage() {
                   {booking.queue_position
                     ? `#${booking.queue_position}`
                     : "Not assigned"}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 p-4">
+                <div className="flex items-center gap-2">
+                  <Wheat
+                    size={18}
+                    className="text-gray-500"
+                  />
+
+                  <p className="text-sm text-gray-500">
+                    Crop
+                  </p>
+                </div>
+
+                <p className="mt-2 text-xl font-bold text-gray-900">
+                  {booking.commodity?.name ||
+                    "Not provided"}
                 </p>
               </div>
 
