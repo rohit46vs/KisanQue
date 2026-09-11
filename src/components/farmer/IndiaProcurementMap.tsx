@@ -246,14 +246,15 @@ export default function IndiaProcurementMap({
     );
   };
 
-  const reportingStates = states
-    .filter(
-      (state) =>
-        state.centres > 0 ||
-        state.farmers > 0 ||
-        state.quantityQtl > 0
-    )
-    .map((state) => state.code);
+ const reportingStates = states
+  .filter(
+    (state) =>
+      state.centres > 0 ||
+      state.farmers > 0 ||
+      state.quantityQtl > 0
+  )
+  .map((state) => state.code)
+  .filter((code) => dotPositions[code] !== undefined);
 
   return (
     <div className="w-full">
