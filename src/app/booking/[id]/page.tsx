@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import QRCode from "qrcode";
 import {
   ArrowLeft,
   CalendarDays,
@@ -11,7 +10,6 @@ import {
   IndianRupee,
   Loader2,
   MapPin,
-  QrCode,
   Scale,
   Ticket,
   Users,
@@ -20,6 +18,8 @@ import {
 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import BookingQrCode from "@/components/farmer/BookingQrCode";
+import CancelBookingButton from "@/components/farmer/CancelBookingButton";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -56,8 +56,8 @@ type Booking = {
       district: string;
       state: string;
       pincode: string;
-    };
-  };
+    } | null;
+  } | null;
 };
 
 type ProcurementTransaction = {
@@ -150,6 +150,9 @@ function getPaymentClass(
 
 function getBookingStatusClass(status: string) {
   switch (status) {
+    case "booked":
+      return "bg-blue-50 text-blue-700";
+
     case "waiting":
       return "bg-amber-50 text-amber-700";
 
@@ -172,6 +175,12 @@ function getBookingStatusClass(status: string) {
       return "bg-green-100 text-green-800";
 
     case "rejected":
+      return "bg-red-50 text-red-700";
+
+    case "skipped":
+      return "bg-gray-100 text-gray-700";
+
+    case "cancelled":
       return "bg-red-50 text-red-700";
 
     default:
@@ -211,9 +220,31 @@ function getBookingStatusLabel(status: string) {
     case "skipped":
       return "Skipped";
 
+    case "cancelled":
+      return "Cancelled";
+
     default:
       return status;
   }
+}
+
+function isActiveBooking(status: string) {
+  return [
+    "booked",
+    "waiting",
+    "called",
+    "arrived",
+    "inspected",
+    "accepted",
+    "payment",
+  ].includes(status);
+}
+
+function isCancellableBooking(status: string) {
+  return (
+    status === "booked" ||
+    status === "waiting"
+  );
 }
 
 export default function BookingDetailsPage() {
@@ -227,9 +258,6 @@ export default function BookingDetailsPage() {
 
   const [transaction, setTransaction] =
     useState<ProcurementTransaction | null>(null);
-
-  const [qrCode, setQrCode] =
-    useState<string | null>(null);
 
   const [loading, setLoading] =
     useState(true);
@@ -288,30 +316,6 @@ export default function BookingDetailsPage() {
         result.data as Booking;
 
       setBooking(bookingData);
-
-      if (bookingData.slot?.centre) {
-        const centre =
-          bookingData.slot.centre;
-
-        const qrData = JSON.stringify({
-          booking_id: bookingData.id,
-          gate_pass_number:
-            bookingData.gate_pass_number,
-          token_number:
-            bookingData.token_number,
-          centre_code:
-            centre.centre_code,
-        });
-
-        const generatedQr =
-          await QRCode.toDataURL(qrData, {
-            width: 280,
-            margin: 2,
-            errorCorrectionLevel: "M",
-          });
-
-        setQrCode(generatedQr);
-      }
     } catch (error) {
       console.error(
         "Load booking details error:",
@@ -483,26 +487,43 @@ export default function BookingDetailsPage() {
     );
   }
 
-  const centre = booking.slot.centre;
+  const centre = booking.slot?.centre;
 
-  const formattedDate = new Date(
-    `${booking.slot.slot_date}T00:00:00`
-  ).toLocaleDateString("en-IN", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  const formattedDate = booking.slot
+    ? new Date(
+        `${booking.slot.slot_date}T00:00:00`
+      ).toLocaleDateString("en-IN", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })
+    : "Date unavailable";
 
   const formattedStartTime =
-    booking.slot.start_time.slice(0, 5);
+    booking.slot?.start_time
+      ? booking.slot.start_time.slice(0, 5)
+      : "—";
 
   const formattedEndTime =
-    booking.slot.end_time.slice(0, 5);
+    booking.slot?.end_time
+      ? booking.slot.end_time.slice(0, 5)
+      : "—";
+
+  const showQrPass =
+    booking.status !== "cancelled" &&
+    Boolean(
+      booking.qr_token &&
+        booking.id &&
+        booking.token_number
+    );
 
   return (
     <main className="min-h-screen bg-[var(--color-background)] px-4 py-8">
       <div className="mx-auto max-w-3xl">
+
+        {/* Back */}
+
         <Link
           href="/my-booking"
           className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-[var(--color-primary)]"
@@ -512,6 +533,7 @@ export default function BookingDetailsPage() {
         </Link>
 
         <div className="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm">
+
           {/* Token Header */}
 
           <div className="bg-[var(--color-primary)] px-6 py-7 text-white">
@@ -535,66 +557,77 @@ export default function BookingDetailsPage() {
           </div>
 
           <div className="space-y-7 p-6">
-            {/* QR */}
 
-            {qrCode && (
-              <div className="rounded-2xl border border-gray-200 p-6 text-center">
-                <div className="mb-4 flex items-center justify-center gap-2">
-                  <QrCode
-                    size={20}
-                    className="text-[var(--color-primary)]"
-                  />
+            {/* Digital Procurement Pass */}
 
-                  <h2 className="font-semibold text-gray-900">
-                    Gate Verification QR
-                  </h2>
+            {showQrPass && (
+              <BookingQrCode
+                bookingId={booking.id}
+                qrToken={booking.qr_token}
+                tokenNumber={
+                  booking.token_number
+                }
+              />
+            )}
+
+            {/* Cancelled Notice */}
+
+            {booking.status ===
+              "cancelled" && (
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
+                <div className="flex items-start gap-3">
+                  <XCircle className="mt-0.5 h-6 w-6 shrink-0 text-red-600" />
+
+                  <div>
+                    <p className="font-semibold text-red-800">
+                      Booking Cancelled
+                    </p>
+
+                    <p className="mt-1 text-sm leading-6 text-red-700">
+                      This booking has been
+                      cancelled. Its queue position
+                      and slot capacity have been
+                      released.
+                    </p>
+                  </div>
                 </div>
-
-                <img
-                  src={qrCode}
-                  alt="Booking verification QR code"
-                  className="mx-auto h-[280px] w-[280px]"
-                />
-
-                <p className="mt-4 text-xs text-gray-500">
-                  Show this QR code at the procurement
-                  centre gate.
-                </p>
               </div>
             )}
 
             {/* Centre */}
 
-            <div className="flex gap-4">
-              <div className="rounded-xl bg-green-50 p-3">
-                <MapPin
-                  size={22}
-                  className="text-[var(--color-primary)]"
-                />
+            {centre && (
+              <div className="flex gap-4">
+                <div className="rounded-xl bg-green-50 p-3">
+                  <MapPin
+                    size={22}
+                    className="text-[var(--color-primary)]"
+                  />
+                </div>
+
+                <div>
+                  <p className="text-sm text-gray-500">
+                    Procurement Centre
+                  </p>
+
+                  <h2 className="font-semibold text-gray-900">
+                    {centre.name}
+                  </h2>
+
+                  <p className="mt-1 text-sm text-gray-600">
+                    {centre.address},{" "}
+                    {centre.district},{" "}
+                    {centre.state} -{" "}
+                    {centre.pincode}
+                  </p>
+
+                  <p className="mt-1 text-xs font-medium text-gray-500">
+                    Centre Code:{" "}
+                    {centre.centre_code}
+                  </p>
+                </div>
               </div>
-
-              <div>
-                <p className="text-sm text-gray-500">
-                  Procurement Centre
-                </p>
-
-                <h2 className="font-semibold text-gray-900">
-                  {centre.name}
-                </h2>
-
-                <p className="mt-1 text-sm text-gray-600">
-                  {centre.address},{" "}
-                  {centre.district},{" "}
-                  {centre.state} -{" "}
-                  {centre.pincode}
-                </p>
-
-                <p className="mt-1 text-xs font-medium text-gray-500">
-                  Centre Code:{" "}
-                  {centre.centre_code}
-                </p>
-              </div>
-            </div>
+            )}
 
             {/* Date / Time */}
 
@@ -642,6 +675,7 @@ export default function BookingDetailsPage() {
             {/* Booking Information */}
 
             <div className="grid gap-4 sm:grid-cols-3">
+
               <div className="rounded-2xl border border-gray-200 p-4">
                 <div className="flex items-center gap-2">
                   <Users
@@ -697,6 +731,7 @@ export default function BookingDetailsPage() {
                     : "Not provided"}
                 </p>
               </div>
+
             </div>
 
             {/* Current Stage */}
@@ -726,9 +761,7 @@ export default function BookingDetailsPage() {
               </div>
             )}
 
-            {/* =====================================================
-                PROCUREMENT & PAYMENT
-            ===================================================== */}
+            {/* Procurement & Payment */}
 
             {paymentLoading ? (
               <div className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
@@ -739,6 +772,7 @@ export default function BookingDetailsPage() {
               </div>
             ) : transaction ? (
               <section className="overflow-hidden rounded-2xl border border-green-200">
+
                 <div className="border-b border-green-100 bg-green-50 px-5 py-4">
                   <div className="flex items-center gap-2">
                     <IndianRupee
@@ -759,9 +793,11 @@ export default function BookingDetailsPage() {
                 </div>
 
                 <div className="space-y-5 p-5">
+
                   {/* Amount Summary */}
 
                   <div className="grid gap-4 sm:grid-cols-2">
+
                     <div className="rounded-xl border border-gray-200 p-4">
                       <p className="text-xs text-gray-500">
                         Final Quantity
@@ -770,7 +806,9 @@ export default function BookingDetailsPage() {
                       <p className="mt-1 text-lg font-bold text-gray-900">
                         {Number(
                           transaction.quantity_kg
-                        ).toLocaleString("en-IN")}{" "}
+                        ).toLocaleString(
+                          "en-IN"
+                        )}{" "}
                         kg
                       </p>
                     </div>
@@ -817,6 +855,7 @@ export default function BookingDetailsPage() {
                         )}
                       </p>
                     </div>
+
                   </div>
 
                   {/* Net Amount */}
@@ -843,6 +882,7 @@ export default function BookingDetailsPage() {
                     )}`}
                   >
                     <div className="flex items-start gap-3">
+
                       {transaction.payment_status ===
                       "credited" ? (
                         <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0" />
@@ -876,6 +916,7 @@ export default function BookingDetailsPage() {
                             : "There was a problem processing the payment. Please contact the procurement centre."}
                         </p>
                       </div>
+
                     </div>
                   </div>
 
@@ -884,6 +925,7 @@ export default function BookingDetailsPage() {
                   {transaction.payment_reference && (
                     <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
                       <div className="grid gap-4 sm:grid-cols-2">
+
                         <div>
                           <p className="text-xs text-blue-600">
                             Payment Reference
@@ -949,9 +991,11 @@ export default function BookingDetailsPage() {
                             </p>
                           </div>
                         )}
+
                       </div>
                     </div>
                   )}
+
                 </div>
               </section>
             ) : paymentError ? (
@@ -972,7 +1016,7 @@ export default function BookingDetailsPage() {
               </div>
             ) : null}
 
-            {/* Information */}
+            {/* Booking Information */}
 
             <div className="flex gap-3 rounded-2xl bg-gray-50 p-4">
               <Ticket
@@ -988,18 +1032,45 @@ export default function BookingDetailsPage() {
                 </p>
 
                 <p className="mt-1 text-xs text-gray-500">
-                  Your token and QR code will be used
-                  for gate verification.
+                  Your token and digital procurement
+                  pass can be used for gate verification.
                 </p>
               </div>
             </div>
 
-            <Link
-              href="/my-queue"
-              className="block w-full rounded-xl bg-[var(--color-primary)] px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-[var(--color-primary-dark)]"
-            >
-              View Live Queue
-            </Link>
+            {/* Actions */}
+
+            <div className="space-y-3">
+
+              {isCancellableBooking(
+                booking.status
+              ) && (
+                <CancelBookingButton
+                  bookingId={booking.id}
+                  onCancelled={loadBooking}
+                />
+              )}
+
+              {isActiveBooking(
+                booking.status
+              ) && (
+                <Link
+                  href={`/my-queue?booking=${booking.id}`}
+                  className="block w-full rounded-xl bg-[var(--color-primary)] px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-[var(--color-primary-dark)]"
+                >
+                  View Live Queue
+                </Link>
+              )}
+
+              <Link
+                href="/my-booking"
+                className="block w-full rounded-xl border border-gray-300 bg-white px-5 py-3 text-center text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+              >
+                Back to My Bookings
+              </Link>
+
+            </div>
+
           </div>
         </div>
       </div>

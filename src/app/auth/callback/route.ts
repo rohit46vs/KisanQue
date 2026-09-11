@@ -5,19 +5,30 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET(
   request: Request
 ) {
-  const requestUrl = new URL(request.url);
+  const { searchParams, origin } =
+    new URL(request.url);
 
   const code =
-    requestUrl.searchParams.get(
-      "code"
-    );
+    searchParams.get("code");
+
+  let next =
+    searchParams.get("next") ?? "/account";
+
+  /*
+   * Only allow internal relative paths.
+   * This prevents the OAuth callback from
+   * becoming an open redirect.
+   */
+  if (
+    !next.startsWith("/") ||
+    next.startsWith("//")
+  ) {
+    next = "/account";
+  }
 
   if (!code) {
     return NextResponse.redirect(
-      new URL(
-        "/login?error=missing_code",
-        requestUrl.origin
-      )
+      `${origin}/login?error=missing_code`
     );
   }
 
@@ -25,30 +36,88 @@ export async function GET(
     await createClient();
 
   const {
-    error,
+    error: exchangeError,
   } =
     await supabase.auth.exchangeCodeForSession(
       code
     );
 
-  if (error) {
+  if (exchangeError) {
     console.error(
-      "Auth callback error:",
-      error.message
+      "OAuth code exchange error:",
+      exchangeError
     );
 
     return NextResponse.redirect(
-      new URL(
-        "/login?error=auth_callback",
-        requestUrl.origin
+      `${origin}/login?error=auth_callback`
+    );
+  }
+
+  const {
+    data: {
+      user,
+    },
+    error: userError,
+  } =
+    await supabase.auth.getUser();
+
+  if (userError || !user) {
+    console.error(
+      "Unable to load authenticated user:",
+      userError
+    );
+
+    return NextResponse.redirect(
+      `${origin}/login?error=user_session`
+    );
+  }
+
+  const {
+    data: profile,
+    error: profileError,
+  } =
+    await supabase
+      .from("profiles")
+      .select(
+        `
+        id,
+        role,
+        onboarding_completed
+        `
       )
+      .eq("id", user.id)
+      .maybeSingle();
+
+  if (profileError) {
+    console.error(
+      "Unable to load farmer profile:",
+      profileError
+    );
+
+    return NextResponse.redirect(
+      `${origin}/login?error=profile`
+    );
+  }
+
+  /*
+   * The profile should normally be created by
+   * the database trigger when the Auth user is
+   * created.
+   *
+   * If it doesn't exist for some reason, send
+   * the user through onboarding so the app can
+   * collect the required farmer information.
+   */
+  if (
+    !profile ||
+    profile.onboarding_completed !== true
+  ) {
+    return NextResponse.redirect(
+      `${origin}/onboarding`
     );
   }
 
   return NextResponse.redirect(
-    new URL(
-      "/account",
-      requestUrl.origin
-    )
+    `${origin}${next}`
   );
 }

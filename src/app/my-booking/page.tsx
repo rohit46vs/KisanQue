@@ -14,6 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import CancelBookingButton from "@/components/farmer/CancelBookingButton";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -79,7 +80,7 @@ type Booking = {
       district: string;
       state: string;
       pincode: string;
-    };
+    } | null;
   } | null;
 };
 
@@ -137,6 +138,9 @@ function getStatusLabel(status: string) {
     case "skipped":
       return "Skipped";
 
+    case "cancelled":
+      return "Cancelled";
+
     default:
       return status;
   }
@@ -144,6 +148,9 @@ function getStatusLabel(status: string) {
 
 function getStatusClass(status: string) {
   switch (status) {
+    case "booked":
+      return "bg-blue-50 text-blue-700";
+
     case "waiting":
       return "bg-amber-50 text-amber-700";
 
@@ -170,6 +177,9 @@ function getStatusClass(status: string) {
 
     case "skipped":
       return "bg-gray-100 text-gray-700";
+
+    case "cancelled":
+      return "bg-red-50 text-red-700";
 
     default:
       return "bg-gray-100 text-gray-700";
@@ -239,6 +249,13 @@ function isActiveBooking(status: string) {
     "accepted",
     "payment",
   ].includes(status);
+}
+
+function isCancellableBooking(status: string) {
+  return (
+    status === "booked" ||
+    status === "waiting"
+  );
 }
 
 export default function MyBookingPage() {
@@ -541,6 +558,7 @@ export default function MyBookingPage() {
   return (
     <main className="min-h-screen bg-[var(--color-background)] px-4 py-10">
       <div className="mx-auto max-w-5xl">
+
         {/* Header */}
 
         <div className="mb-8">
@@ -615,6 +633,7 @@ export default function MyBookingPage() {
                 key={booking.id}
                 className="overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm"
               >
+
                 {/* Token Header */}
 
                 <div className="bg-[var(--color-primary)] px-6 py-6 text-white">
@@ -656,6 +675,7 @@ export default function MyBookingPage() {
                 </div>
 
                 <div className="space-y-6 p-6">
+
                   {/* Centre */}
 
                   {centre && (
@@ -862,6 +882,7 @@ export default function MyBookingPage() {
                       </div>
 
                       <div className="space-y-5 p-5">
+
                         {/* Financial Summary */}
 
                         <div className="grid gap-4 sm:grid-cols-2">
@@ -1095,7 +1116,43 @@ export default function MyBookingPage() {
                         View Queue
                       </Link>
                     )}
+
+                    {isCancellableBooking(
+                      booking.status
+                    ) && (
+                      <div className="sm:col-span-2">
+                        <CancelBookingButton
+                          bookingId={booking.id}
+                          onCancelled={
+                            loadBookings
+                          }
+                        />
+                      </div>
+                    )}
                   </div>
+
+                  {/* Cancelled Information */}
+
+                  {booking.status ===
+                    "cancelled" && (
+                    <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
+                      <div className="flex items-start gap-3">
+                        <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+
+                        <div>
+                          <p className="font-semibold text-red-800">
+                            Booking Cancelled
+                          </p>
+
+                          <p className="mt-1 text-sm leading-6 text-red-700">
+                            This booking has been
+                            cancelled and its queue
+                            position has been released.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </section>
             );
