@@ -5,10 +5,15 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Loader2, Package, Scale } from "lucide-react";
 import BookSlotButton from "@/components/farmer/BookSlotButton";
 import { Card } from "@/components/ui/Card";
 import { createClient } from "@/lib/supabase/client";
+import {
+  CheckCircle2,
+  Loader2,
+  Scale,
+  Sprout,
+} from "lucide-react";
 
 type Slot = {
   id: string;
@@ -20,17 +25,29 @@ type Slot = {
   is_active: boolean;
 };
 
+type AvailableSlotsProps = {
+  slots: Slot[];
+};
+
+type Profile = {
+  state: string | null;
+};
+
 type Commodity = {
   id: string;
   name: string;
   code: string;
   category: string;
-  storage_requirement: string;
-  is_active: boolean;
 };
 
-type AvailableSlotsProps = {
-  slots: Slot[];
+type ProcurementPrice = {
+  id: string;
+  commodity_id: string;
+  state_name: string;
+  price_per_qtl: number;
+  effective_from: string;
+  effective_to: string | null;
+  is_active: boolean;
 };
 
 function formatDate(dateString: string) {
@@ -40,11 +57,9 @@ function formatDate(dateString: string) {
     day: date.toLocaleDateString("en-IN", {
       day: "numeric",
     }),
-
     month: date.toLocaleDateString("en-IN", {
       month: "short",
     }),
-
     weekday: date.toLocaleDateString("en-IN", {
       weekday: "short",
     }),
@@ -67,25 +82,222 @@ function formatTime(time: string) {
   });
 }
 
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function normalizeState(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
 export default function AvailableSlots({
   slots,
 }: AvailableSlotsProps) {
   const supabase = createClient();
 
+  const [profile, setProfile] =
+    useState<Profile | null>(null);
+
   const [commodities, setCommodities] =
     useState<Commodity[]>([]);
+
+  const [prices, setPrices] =
+    useState<ProcurementPrice[]>([]);
 
   const [selectedCommodityId, setSelectedCommodityId] =
     useState("");
 
-  const [quantity, setQuantity] =
+  const [quantityInput, setQuantityInput] =
     useState("");
 
-  const [commodityLoading, setCommodityLoading] =
+  const [loadingBookingOptions, setLoadingBookingOptions] =
     useState(true);
 
-  const [commodityError, setCommodityError] =
+  const [bookingOptionsError, setBookingOptionsError] =
     useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadBookingOptions() {
+      try {
+        setLoadingBookingOptions(true);
+        setBookingOptionsError(null);
+
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError || !user) {
+          throw new Error(
+            "Unable to load your account."
+          );
+        }
+
+        const [
+          profileResult,
+          commodityResult,
+          priceResult,
+        ] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select("state")
+            .eq("id", user.id)
+            .maybeSingle(),
+
+          supabase
+            .from("commodities")
+            .select(
+              "id, name, code, category"
+            )
+            .eq("is_active", true)
+            .order("name", {
+              ascending: true,
+            }),
+
+          supabase
+            .from("procurement_prices")
+            .select(
+              `
+              id,
+              commodity_id,
+              state_name,
+              price_per_qtl,
+              effective_from,
+              effective_to,
+              is_active
+            `
+            )
+            .eq("is_active", true)
+            .order("effective_from", {
+              ascending: false,
+            }),
+        ]);
+
+        if (profileResult.error) {
+          throw profileResult.error;
+        }
+
+        if (commodityResult.error) {
+          throw commodityResult.error;
+        }
+
+        if (priceResult.error) {
+          throw priceResult.error;
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const loadedProfile =
+          (profileResult.data ??
+            null) as Profile | null;
+
+        const loadedCommodities =
+          (commodityResult.data ??
+            []) as Commodity[];
+
+        const loadedPrices =
+          (priceResult.data ??
+            []) as ProcurementPrice[];
+
+        setProfile(loadedProfile);
+        setCommodities(loadedCommodities);
+        setPrices(loadedPrices);
+
+        /*
+         * Prefer a crop that has a current price for
+         * the farmer's state. This prevents the farmer
+         * from initially landing on an unavailable crop.
+         */
+        const farmerState = normalizeState(
+          loadedProfile?.state
+        );
+
+        const today =
+          new Date()
+            .toISOString()
+            .slice(0, 10);
+
+        const pricedCommodityIds =
+          new Set(
+            loadedPrices
+              .filter((price) => {
+                if (
+                  normalizeState(
+                    price.state_name
+                  ) !== farmerState
+                ) {
+                  return false;
+                }
+
+                if (!price.is_active) {
+                  return false;
+                }
+
+                if (
+                  price.effective_from > today
+                ) {
+                  return false;
+                }
+
+                if (
+                  price.effective_to &&
+                  price.effective_to < today
+                ) {
+                  return false;
+                }
+
+                return price.price_per_qtl > 0;
+              })
+              .map(
+                (price) =>
+                  price.commodity_id
+              )
+          );
+
+        const firstPricedCommodity =
+          loadedCommodities.find((commodity) =>
+            pricedCommodityIds.has(
+              commodity.id
+            )
+          );
+
+        if (firstPricedCommodity) {
+          setSelectedCommodityId(
+            firstPricedCommodity.id
+          );
+        }
+      } catch (error) {
+        console.error(
+          "Load booking options error:",
+          error
+        );
+
+        if (!cancelled) {
+          setBookingOptionsError(
+            "Unable to load crop and procurement price information."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingBookingOptions(false);
+        }
+      }
+    }
+
+    loadBookingOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
 
   const availableSlots = useMemo(
     () =>
@@ -110,68 +322,27 @@ export default function AvailableSlots({
   }, [availableSlots]);
 
   const [selectedDate, setSelectedDate] =
-    useState(availableDates[0] ?? "");
+    useState("");
 
   useEffect(() => {
     if (
-      availableDates.length > 0 &&
-      !availableDates.includes(selectedDate)
+      availableDates.length === 0
     ) {
-      setSelectedDate(availableDates[0]);
+      setSelectedDate("");
+      return;
     }
-  }, [availableDates, selectedDate]);
 
-  useEffect(() => {
-    async function loadCommodities() {
-      try {
-        setCommodityLoading(true);
-        setCommodityError(null);
-
-        const { data, error } =
-          await supabase
-            .from("commodities")
-            .select(
-              `
-              id,
-              name,
-              code,
-              category,
-              storage_requirement,
-              is_active
-              `
-            )
-            .eq("is_active", true)
-            .order("name", {
-              ascending: true,
-            });
-
-        if (error) {
-          throw error;
-        }
-
-        setCommodities(data ?? []);
-
-        if (data && data.length > 0) {
-          setSelectedCommodityId(
-            data[0].id
-          );
-        }
-      } catch (error) {
-        console.error(
-          "Failed to load commodities:",
-          error
-        );
-
-        setCommodityError(
-          "Unable to load crop types. Please refresh the page and try again."
-        );
-      } finally {
-        setCommodityLoading(false);
+    setSelectedDate((current) => {
+      if (
+        current &&
+        availableDates.includes(current)
+      ) {
+        return current;
       }
-    }
 
-    loadCommodities();
-  }, [supabase]);
+      return availableDates[0];
+    });
+  }, [availableDates]);
 
   const selectedSlots = useMemo(
     () =>
@@ -188,17 +359,165 @@ export default function AvailableSlots({
     [availableSlots, selectedDate]
   );
 
-  const selectedQuantity = Number(quantity);
+  const currentPrice = useMemo(() => {
+    if (
+      !selectedCommodityId ||
+      !profile?.state
+    ) {
+      return null;
+    }
 
-  const quantityIsValid =
-    quantity.trim() !== "" &&
-    Number.isFinite(selectedQuantity) &&
-    selectedQuantity > 0 &&
-    selectedQuantity <= 1000;
+    const today = new Date()
+      .toISOString()
+      .slice(0, 10);
 
-  const bookingReady =
-    Boolean(selectedCommodityId) &&
-    quantityIsValid;
+    const matchingPrices = prices
+      .filter((price) => {
+        if (
+          price.commodity_id !==
+          selectedCommodityId
+        ) {
+          return false;
+        }
+
+        if (
+          normalizeState(
+            price.state_name
+          ) !==
+          normalizeState(profile.state)
+        ) {
+          return false;
+        }
+
+        if (!price.is_active) {
+          return false;
+        }
+
+        if (
+          price.effective_from > today
+        ) {
+          return false;
+        }
+
+        if (
+          price.effective_to &&
+          price.effective_to < today
+        ) {
+          return false;
+        }
+
+        return price.price_per_qtl > 0;
+      })
+      .sort((a, b) => {
+        if (
+          a.effective_from !==
+          b.effective_from
+        ) {
+          return b.effective_from.localeCompare(
+            a.effective_from
+          );
+        }
+
+        return b.id.localeCompare(a.id);
+      });
+
+    return matchingPrices[0] ?? null;
+  }, [
+    prices,
+    profile?.state,
+    selectedCommodityId,
+  ]);
+
+  const selectedCommodity = useMemo(
+    () =>
+      commodities.find(
+        (commodity) =>
+          commodity.id ===
+          selectedCommodityId
+      ) ?? null,
+    [commodities, selectedCommodityId]
+  );
+
+  const estimatedQuantityQtl = useMemo(() => {
+    if (!quantityInput.trim()) {
+      return null;
+    }
+
+    const value = Number(
+      quantityInput
+    );
+
+    if (
+      !Number.isFinite(value) ||
+      value <= 0 ||
+      value > 1000
+    ) {
+      return null;
+    }
+
+    return value;
+  }, [quantityInput]);
+
+  const estimatedValue = useMemo(() => {
+    if (
+      estimatedQuantityQtl === null ||
+      !currentPrice
+    ) {
+      return null;
+    }
+
+    return (
+      estimatedQuantityQtl *
+      Number(currentPrice.price_per_qtl)
+    );
+  }, [
+    currentPrice,
+    estimatedQuantityQtl,
+  ]);
+
+  const pricedCommodityIds = useMemo(() => {
+    const today = new Date()
+      .toISOString()
+      .slice(0, 10);
+
+    const farmerState =
+      normalizeState(profile?.state);
+
+    return new Set(
+      prices
+        .filter((price) => {
+          if (
+            normalizeState(
+              price.state_name
+            ) !== farmerState
+          ) {
+            return false;
+          }
+
+          if (!price.is_active) {
+            return false;
+          }
+
+          if (
+            price.effective_from > today
+          ) {
+            return false;
+          }
+
+          if (
+            price.effective_to &&
+            price.effective_to < today
+          ) {
+            return false;
+          }
+
+          return price.price_per_qtl > 0;
+        })
+        .map(
+          (price) => price.commodity_id
+        )
+    );
+  }, [prices, profile?.state]);
 
   if (availableSlots.length === 0) {
     return (
@@ -217,46 +536,50 @@ export default function AvailableSlots({
 
   return (
     <div>
-      {/* Crop and quantity */}
-      <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 sm:p-6">
-        <div>
-          <p className="text-sm font-semibold text-gray-900">
-            What are you bringing?
-          </p>
+      {/* Booking options */}
+      <Card className="border-[var(--color-primary)]/20 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <div className="rounded-xl bg-[var(--color-primary-light)] p-2.5">
+            <Sprout
+              size={22}
+              className="text-[var(--color-primary)]"
+            />
+          </div>
 
-          <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
-            Select the crop you want to sell and
-            enter your estimated quantity.
-          </p>
+          <div>
+            <h2 className="text-lg font-bold">
+              Crop & Quantity
+            </h2>
+
+            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+              Select what you are bringing and
+              enter your estimated quantity.
+            </p>
+          </div>
         </div>
 
-        <div className="mt-5 grid gap-5 md:grid-cols-2">
-          {/* Crop */}
-          <div>
-            <label
-              htmlFor="booking-crop"
-              className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-800"
-            >
-              <Package
-                size={17}
-                className="text-[var(--color-primary)]"
-              />
-              Crop type
-            </label>
+        {loadingBookingOptions ? (
+          <div className="mt-5 flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+            <Loader2
+              size={17}
+              className="animate-spin"
+            />
+            Loading crops and current rates...
+          </div>
+        ) : bookingOptionsError ? (
+          <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            {bookingOptionsError}
+          </div>
+        ) : (
+          <div className="mt-5 space-y-5">
+            <div>
+              <label
+                htmlFor="booking-crop"
+                className="mb-2 block text-sm font-semibold"
+              >
+                Crop
+              </label>
 
-            {commodityLoading ? (
-              <div className="flex h-12 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-gray-50 px-4 text-sm text-gray-500">
-                <Loader2
-                  size={16}
-                  className="animate-spin"
-                />
-                Loading crop types...
-              </div>
-            ) : commodityError ? (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {commodityError}
-              </div>
-            ) : (
               <select
                 id="booking-crop"
                 value={selectedCommodityId}
@@ -265,7 +588,7 @@ export default function AvailableSlots({
                     event.target.value
                   )
                 }
-                className="h-12 w-full rounded-xl border border-[var(--color-border)] bg-white px-4 text-sm font-medium text-gray-900 outline-none transition focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20"
+                className="w-full rounded-xl border border-[var(--color-border)] bg-white px-4 py-3 text-sm outline-none transition focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/10"
               >
                 <option value="">
                   Select crop
@@ -276,92 +599,187 @@ export default function AvailableSlots({
                     <option
                       key={commodity.id}
                       value={commodity.id}
+                      disabled={
+                        !pricedCommodityIds.has(
+                          commodity.id
+                        )
+                      }
                     >
                       {commodity.name}
+                      {!pricedCommodityIds.has(
+                        commodity.id
+                      )
+                        ? " — price not configured"
+                        : ""}
                     </option>
                   )
                 )}
               </select>
-            )}
-          </div>
-
-          {/* Quantity */}
-          <div>
-            <label
-              htmlFor="booking-quantity"
-              className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-800"
-            >
-              <Scale
-                size={17}
-                className="text-[var(--color-primary)]"
-              />
-              Estimated quantity
-            </label>
-
-            <div className="relative">
-              <input
-                id="booking-quantity"
-                type="number"
-                min="0.01"
-                max="1000"
-                step="0.01"
-                inputMode="decimal"
-                placeholder="Enter quantity"
-                value={quantity}
-                onChange={(event) =>
-                  setQuantity(event.target.value)
-                }
-                className="h-12 w-full rounded-xl border border-[var(--color-border)] bg-white px-4 pr-16 text-sm font-medium text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20"
-              />
-
-              <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-sm font-semibold text-gray-500">
-                QTL
-              </span>
             </div>
 
-            <p className="mt-1.5 text-xs text-[var(--color-text-secondary)]">
-              Enter your expected quantity. Maximum
-              1000 QTL.
-            </p>
+            {selectedCommodity && (
+              <div className="rounded-xl bg-gray-50 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                      Selected Crop
+                    </p>
 
-            {quantity.trim() !== "" &&
-              !quantityIsValid && (
-                <p className="mt-1 text-xs text-red-600">
-                  Quantity must be greater than 0 and
-                  not more than 1000 QTL.
-                </p>
-              )}
-          </div>
-        </div>
+                    <p className="mt-1 font-semibold text-gray-900">
+                      {selectedCommodity.name}
+                    </p>
 
-        {/* Booking summary */}
-        {bookingReady && (
-          <div className="mt-5 rounded-xl bg-[var(--color-primary-light)] px-4 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="text-xs text-[var(--color-text-secondary)]">
-                  Booking details
-                </p>
+                    <p className="text-xs text-gray-500">
+                      Code:{" "}
+                      {selectedCommodity.code}
+                    </p>
+                  </div>
 
-                <p className="mt-0.5 text-sm font-semibold text-[var(--color-primary-dark)]">
-                  {
-                    commodities.find(
-                      (commodity) =>
-                        commodity.id ===
-                        selectedCommodityId
-                    )?.name
-                  }{" "}
-                  · {selectedQuantity} QTL
-                </p>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-gray-600">
+                    {selectedCommodity.category}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label
+                htmlFor="estimated-quantity"
+                className="mb-2 block text-sm font-semibold"
+              >
+                Estimated Quantity
+              </label>
+
+              <div className="relative">
+                <Scale
+                  size={18}
+                  className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
+                />
+
+                <input
+                  id="estimated-quantity"
+                  type="number"
+                  min="0.01"
+                  max="1000"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={quantityInput}
+                  onChange={(event) =>
+                    setQuantityInput(
+                      event.target.value
+                    )
+                  }
+                  placeholder="e.g. 25"
+                  className="w-full rounded-xl border border-[var(--color-border)] bg-white py-3 pl-11 pr-16 text-sm outline-none transition focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/10"
+                />
+
+                <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm font-medium text-gray-500">
+                  QTL
+                </span>
               </div>
 
-              <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[var(--color-primary)]">
-                Ready to book
-              </span>
+              <p className="mt-1.5 text-xs text-[var(--color-text-secondary)]">
+                Enter an estimate between 0.01
+                and 1000 QTL.
+              </p>
             </div>
+
+            <div
+              className={`rounded-2xl border p-4 ${
+                currentPrice
+                  ? "border-green-200 bg-green-50"
+                  : "border-amber-200 bg-amber-50"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p
+                    className={`text-xs font-medium ${
+                      currentPrice
+                        ? "text-green-700"
+                        : "text-amber-700"
+                    }`}
+                  >
+                    Current Procurement Rate
+                  </p>
+
+                  {currentPrice ? (
+                    <>
+                      <p className="mt-1 text-2xl font-bold text-green-900">
+                        {formatCurrency(
+                          Number(
+                            currentPrice.price_per_qtl
+                          )
+                        )}
+                        <span className="ml-1 text-sm font-medium">
+                          / QTL
+                        </span>
+                      </p>
+
+                      <p className="mt-1 text-xs text-green-700">
+                        {profile?.state}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="mt-1 font-semibold text-amber-900">
+                      Price not configured
+                    </p>
+                  )}
+                </div>
+
+                {currentPrice && (
+                  <CheckCircle2
+                    size={22}
+                    className="text-green-600"
+                  />
+                )}
+              </div>
+
+              {!currentPrice &&
+                selectedCommodityId && (
+                  <p className="mt-2 text-xs text-amber-800">
+                    This crop cannot currently be
+                    booked because an active rate
+                    has not been configured for
+                    your state.
+                  </p>
+                )}
+            </div>
+
+            {estimatedValue !== null && (
+              <div className="rounded-2xl bg-[var(--color-primary-light)] p-5">
+                <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-primary)]">
+                  Estimated Procurement Value
+                </p>
+
+                <p className="mt-1 text-3xl font-bold text-gray-900">
+                  {formatCurrency(
+                    estimatedValue
+                  )}
+                </p>
+
+                <p className="mt-1 text-xs text-gray-600">
+                  {estimatedQuantityQtl} QTL ×{" "}
+                  {formatCurrency(
+                    Number(
+                      currentPrice?.price_per_qtl ??
+                        0
+                    )
+                  )}{" "}
+                  / QTL
+                </p>
+
+                <p className="mt-3 text-xs text-gray-500">
+                  This is an estimate. Final
+                  procurement value is determined
+                  from the actual accepted quantity
+                  and applicable procurement price.
+                </p>
+              </div>
+            )}
           </div>
         )}
-      </div>
+      </Card>
 
       {/* Date selector */}
       <div className="mt-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
@@ -372,17 +790,17 @@ export default function AvailableSlots({
             </p>
 
             <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-              Choose when you want to visit the
-              procurement centre.
+              Showing the first available date by
+              default.
             </p>
           </div>
 
           <span className="text-xs font-medium text-[var(--color-primary)]">
-            {availableDates.length} dates available
+            {availableDates.length} dates
+            available
           </span>
         </div>
 
-        {/* Dates */}
         <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
           {availableDates.map((date) => {
             const formatted =
@@ -449,7 +867,7 @@ export default function AvailableSlots({
         </div>
       </div>
 
-      {/* Selected date */}
+      {/* Selected date / slots */}
       <div className="mt-6">
         <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -457,11 +875,13 @@ export default function AvailableSlots({
               Available times
             </h3>
 
-            <p className="text-sm text-[var(--color-text-secondary)]">
-              {selectedDate
-                ? `${formatDate(selectedDate).weekday}, ${formatDate(selectedDate).day} ${formatDate(selectedDate).month}`
-                : "Select a date"}
-            </p>
+            {selectedDate && (
+              <p className="text-sm text-[var(--color-text-secondary)]">
+                {formatDate(selectedDate).weekday},{" "}
+                {formatDate(selectedDate).day}{" "}
+                {formatDate(selectedDate).month}
+              </p>
+            )}
           </div>
 
           <p className="text-xs font-medium text-[var(--color-primary)]">
@@ -486,14 +906,13 @@ export default function AvailableSlots({
                 slot.capacity -
                 slot.booked_count;
 
-              const isFull = remaining <= 0;
+              const isFull =
+                remaining <= 0;
 
               return (
                 <Card
                   key={slot.id}
-                  hover={
-                    !isFull && bookingReady
-                  }
+                  hover={!isFull}
                   className="p-5"
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -526,36 +945,38 @@ export default function AvailableSlots({
                     </span>
                   </div>
 
-                  <div className="mt-5 flex flex-col gap-3 border-t border-[var(--color-border)] pt-4 sm:flex-row sm:items-center sm:justify-between">
-                    <span className="text-sm text-[var(--color-text-secondary)]">
-                      {slot.booked_count} /{" "}
-                      {slot.capacity} booked
-                    </span>
+                  <div className="mt-5 flex flex-col gap-4 border-t border-[var(--color-border)] pt-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm text-[var(--color-text-secondary)]">
+                        {slot.booked_count} /{" "}
+                        {slot.capacity} booked
+                      </span>
 
-                    <BookSlotButton
-                      slotId={slot.id}
-                      commodityId={
-                        selectedCommodityId
-                      }
-                      estimatedQuantityQtl={
-                        selectedQuantity
-                      }
-                      disabled={
-                        isFull ||
-                        !bookingReady ||
-                        commodityLoading ||
-                        Boolean(commodityError)
-                      }
-                    />
+                      {selectedCommodity &&
+                        currentPrice && (
+                          <span className="text-xs font-medium text-green-700">
+                            {selectedCommodity.name}
+                          </span>
+                        )}
+                    </div>
+
+                    <div className="flex justify-end">
+                      <BookSlotButton
+                        slotId={slot.id}
+                        commodityId={
+                          currentPrice
+                            ? selectedCommodityId
+                            : ""
+                        }
+                        estimatedQuantityQtl={
+                          currentPrice
+                            ? estimatedQuantityQtl
+                            : null
+                        }
+                        disabled={isFull}
+                      />
+                    </div>
                   </div>
-
-                  {!bookingReady &&
-                    !commodityLoading && (
-                      <p className="mt-2 text-right text-xs text-amber-700">
-                        Select a crop and enter
-                        quantity to book.
-                      </p>
-                    )}
                 </Card>
               );
             })}

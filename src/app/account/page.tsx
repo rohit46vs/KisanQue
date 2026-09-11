@@ -14,6 +14,7 @@ import {
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
+import ProcurementPrices from "@/components/farmer/ProcurementPrices";
 
 export default async function AccountPage() {
   const supabase = await createClient();
@@ -93,7 +94,7 @@ export default async function AccountPage() {
 
   const state =
     profile?.state ||
-    "Not added";
+    null;
 
   const pincode =
     profile?.pincode ||
@@ -107,7 +108,6 @@ export default async function AccountPage() {
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-[#dce9df] bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-[68px] max-w-7xl items-center justify-between px-5 sm:px-6 lg:px-8">
-
           {/* Logo */}
           <Link
             href="/"
@@ -133,18 +133,17 @@ export default async function AccountPage() {
 
           {/* Header Actions */}
           <div className="flex items-center gap-2">
-
             {/* My Profile Dropdown */}
             <details className="relative">
               <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-[#d8e5dc] bg-white px-3.5 py-2.5 text-[11px] font-semibold text-[#52645a] transition hover:border-[#a9cfb4] hover:bg-[#f3faf5] hover:text-[#16803c] [&::-webkit-details-marker]:hidden">
                 <UserRound size={14} />
+
                 <span className="hidden sm:inline">
                   My Profile
                 </span>
               </summary>
 
               <div className="absolute right-0 top-[calc(100%+10px)] z-[60] w-[340px] overflow-hidden rounded-2xl border border-[#dce9df] bg-white shadow-[0_18px_45px_rgba(22,74,40,0.14)]">
-
                 {/* Profile Header */}
                 <div className="border-b border-[#e6eee8] bg-[#f5fbf7] p-4">
                   <div className="flex items-center gap-3">
@@ -166,7 +165,6 @@ export default async function AccountPage() {
 
                 {/* Profile Details */}
                 <div className="max-h-[70vh] overflow-y-auto p-3">
-
                   <ProfileDropdownItem
                     icon={<UserRound size={14} />}
                     label="Full Name"
@@ -206,7 +204,7 @@ export default async function AccountPage() {
                   <ProfileDropdownItem
                     icon={<MapPin size={14} />}
                     label="State / Union Territory"
-                    value={state}
+                    value={state ?? "Not added"}
                   />
 
                   <ProfileDropdownItem
@@ -238,7 +236,6 @@ export default async function AccountPage() {
                       </span>
                     )}
                   </div>
-
                 </div>
 
                 {/* Footer */}
@@ -251,7 +248,6 @@ export default async function AccountPage() {
                     <ArrowRight size={12} />
                   </Link>
                 </div>
-
               </div>
             </details>
 
@@ -262,22 +258,20 @@ export default async function AccountPage() {
                 className="inline-flex items-center gap-2 rounded-lg border border-[#d8e5dc] bg-white px-4 py-2.5 text-[11px] font-semibold text-[#52645a] transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
               >
                 <LogOut size={14} />
+
                 <span className="hidden sm:inline">
                   Logout
                 </span>
               </button>
             </form>
-
           </div>
         </div>
       </header>
 
       <div className="mx-auto max-w-6xl px-5 py-8 sm:px-6 lg:px-8 lg:py-12">
-
         {/* Welcome */}
         <section className="rounded-[22px] border border-[#d7e9dc] bg-white p-6 shadow-[0_8px_30px_rgba(22,74,40,0.05)] sm:p-8">
           <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-
             <div className="flex items-center gap-4">
               <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[#eaf8ef] text-[#16803c]">
                 <UserRound size={28} />
@@ -308,7 +302,6 @@ export default async function AccountPage() {
                 {role}
               </span>
             )}
-
           </div>
         </section>
 
@@ -329,7 +322,6 @@ export default async function AccountPage() {
         {/* Quick Actions */}
         {isFarmer && (
           <section className="mt-6 grid gap-4 md:grid-cols-3">
-
             <AccountAction
               href="/centres"
               icon={<CalendarDays size={21} />}
@@ -351,14 +343,17 @@ export default async function AccountPage() {
               title="My Queue"
               description="Track your live queue position and procurement stage."
             />
-
           </section>
+        )}
+
+        {/* Procurement Prices */}
+        {isFarmer && (
+          <ProcurementPrices farmerState={state} />
         )}
 
         {/* Profile shortcut */}
         <section className="mt-8 rounded-[20px] border border-[#dce9df] bg-gradient-to-r from-[#f0faf3] to-white p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#e1f6e8] text-[#16803c]">
                 <UserRound size={19} />
@@ -382,14 +377,12 @@ export default async function AccountPage() {
             <span className="hidden text-[#16803c] sm:block">
               <ArrowRight size={18} />
             </span>
-
           </div>
         </section>
 
         {/* Journey */}
         {isFarmer && (
           <section className="mt-8 rounded-[20px] border border-[#dce9df] bg-white p-6">
-
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#16803c]">
@@ -408,7 +401,6 @@ export default async function AccountPage() {
             </div>
 
             <div className="mt-6 grid gap-3 sm:grid-cols-4">
-
               <JourneyStep
                 number="01"
                 title="Book"
@@ -428,12 +420,9 @@ export default async function AccountPage() {
                 number="04"
                 title="Receive Payment"
               />
-
             </div>
-
           </section>
         )}
-
       </div>
     </main>
   );
@@ -520,7 +509,6 @@ function ProfileDropdownItem({
 }) {
   return (
     <div className="flex gap-3 rounded-xl px-3 py-2.5 transition hover:bg-[#f7faf8]">
-
       <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#edf8f1] text-[#16803c]">
         {icon}
       </div>
@@ -534,7 +522,6 @@ function ProfileDropdownItem({
           {value}
         </p>
       </div>
-
     </div>
   );
 }

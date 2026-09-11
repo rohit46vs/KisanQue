@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 type BookSlotButtonProps = {
   slotId: string;
   commodityId: string;
-  estimatedQuantityQtl: number;
+  estimatedQuantityQtl: number | null;
   disabled?: boolean;
 };
 
@@ -26,8 +26,9 @@ export default function BookSlotButton({
   const supabase = createClient();
 
   const [loading, setLoading] = useState(false);
-  const [error, setError] =
-    useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    null
+  );
 
   async function handleBookSlot() {
     if (loading || disabled) {
@@ -35,23 +36,17 @@ export default function BookSlotButton({
     }
 
     if (!commodityId) {
-      setError("Please select a crop.");
+      setError("Please select a crop first.");
       return;
     }
 
     if (
+      estimatedQuantityQtl === null ||
       !Number.isFinite(estimatedQuantityQtl) ||
       estimatedQuantityQtl <= 0
     ) {
       setError(
-        "Please enter a valid quantity greater than 0 QTL."
-      );
-      return;
-    }
-
-    if (estimatedQuantityQtl > 1000) {
-      setError(
-        "Quantity cannot be more than 1000 QTL."
+        "Please enter a valid estimated quantity."
       );
       return;
     }
@@ -65,10 +60,7 @@ export default function BookSlotButton({
         error: sessionError,
       } = await supabase.auth.getSession();
 
-      if (
-        sessionError ||
-        !session?.access_token
-      ) {
+      if (sessionError || !session?.access_token) {
         setError(
           "Your session has expired. Please log in again."
         );
@@ -119,9 +111,7 @@ export default function BookSlotButton({
         return;
       }
 
-      router.push(
-        `/booking/${booking.id}`
-      );
+      router.push(`/booking/${booking.id}`);
     } catch (error) {
       console.error(
         "Unexpected booking error:",
@@ -136,12 +126,36 @@ export default function BookSlotButton({
     }
   }
 
+  const buttonDisabled =
+    disabled ||
+    loading ||
+    !commodityId ||
+    estimatedQuantityQtl === null ||
+    !Number.isFinite(estimatedQuantityQtl) ||
+    estimatedQuantityQtl <= 0;
+
+  let buttonLabel = "Book Slot";
+
+  if (loading) {
+    buttonLabel = "Booking...";
+  } else if (disabled) {
+    buttonLabel = "Slot full";
+  } else if (!commodityId) {
+    buttonLabel = "Select crop";
+  } else if (
+    estimatedQuantityQtl === null ||
+    !Number.isFinite(estimatedQuantityQtl) ||
+    estimatedQuantityQtl <= 0
+  ) {
+    buttonLabel = "Enter quantity";
+  }
+
   return (
     <div className="flex flex-col items-end gap-2">
       <button
         type="button"
         onClick={handleBookSlot}
-        disabled={disabled || loading}
+        disabled={buttonDisabled}
         className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--color-primary)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--color-primary-dark)] disabled:cursor-not-allowed disabled:opacity-50"
       >
         {loading && (
@@ -151,11 +165,7 @@ export default function BookSlotButton({
           />
         )}
 
-        {loading
-          ? "Booking..."
-          : disabled
-            ? "Slot full"
-            : "Book Slot"}
+        {buttonLabel}
       </button>
 
       {error && (
